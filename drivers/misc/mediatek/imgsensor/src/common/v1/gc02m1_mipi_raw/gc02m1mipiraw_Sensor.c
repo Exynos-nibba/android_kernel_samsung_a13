@@ -19,6 +19,7 @@
 #include "kd_imgsensor.h"
 #include "kd_imgsensor_define.h"
 #include "kd_imgsensor_errcode.h"
+#include "kd_imgsensor_sysfs_adapter.h"
 
 #include "gc02m1mipiraw_Sensor.h"
 #include "gc02m1mipiraw_setfile.h"
@@ -43,6 +44,8 @@ static const int I2C_BUFFER_LEN = 1020;
 #else
 static const int I2C_BUFFER_LEN = 4;
 #endif
+
+int position_sensor = SENSOR_POSITION_REAR4;
 
 /*
  * Image Sensor Scenario
@@ -665,11 +668,13 @@ static kal_uint16 table_write_cmos_sensor(kal_uint16 *para, kal_uint32 len)
 	return 0;
 }
 
-static void set_mode_setfile(enum IMGSENSOR_MODE mode)
+static int set_mode_setfile(enum IMGSENSOR_MODE mode)
 {
+	int ret = -1;
+
 	if (mode >= IMGSENSOR_MODE_MAX) {
 		LOG_ERR("invalid mode: %d", mode);
-		return;
+		return -1;
 	}
 	LOG_INF(" - E");
 	LOG_INF("mode: %s", gc02m1_setfile_info[mode].name);
@@ -677,15 +682,25 @@ static void set_mode_setfile(enum IMGSENSOR_MODE mode)
 	if ((gc02m1_setfile_info[mode].setfile == NULL) || (gc02m1_setfile_info[mode].size == 0))
 		LOG_ERR("failed, mode: %d", mode);
 	else
-		table_write_cmos_sensor(gc02m1_setfile_info[mode].setfile, gc02m1_setfile_info[mode].size);
+		ret = table_write_cmos_sensor(gc02m1_setfile_info[mode].setfile, gc02m1_setfile_info[mode].size);
 
 	LOG_INF(" - X");
+
+	return ret;
 }
 
 static void sensor_init(void)
 {
+	int ret = 0;
+
 	LOG_INF("- E");
-	set_mode_setfile(IMGSENSOR_MODE_INIT);
+	ret = set_mode_setfile(IMGSENSOR_MODE_INIT);
+
+#ifdef IMGSENSOR_HW_PARAM
+	if (ret != 0)
+		imgsensor_increase_hw_param_err_cnt(position_sensor);
+#endif
+
 	LOG_INF("- X");
 }				/*    sensor_init  */
 
@@ -1639,6 +1654,7 @@ static void set_imgsensor_info_by_sensor_id(unsigned int sensor_id)
 	case GC02M1_SENSOR_ID: //for macro sensor
 		LOG_INF("set imgsensor info for GC02M1");
 		imgsensor_info.sensor_output_dataformat = SENSOR_OUTPUT_FORMAT_RAW_R;
+		position_sensor = GC02M1_CAL_SENSOR_POSITION;
 
 #if defined(CONFIG_CAMERA_AAT_V12) || defined(CONFIG_CAMERA_AAU_V22) ||\
 	defined(CONFIG_CAMERA_MMU_V22) || defined(CONFIG_CAMERA_MMU_V32)
@@ -1660,6 +1676,7 @@ static void set_imgsensor_info_by_sensor_id(unsigned int sensor_id)
 	case GC02M1B_SENSOR_ID: //for bokeh sensor
 		LOG_INF("set imgsensor info for GC02M1B");
 		imgsensor_info.sensor_output_dataformat = SENSOR_OUTPUT_FORMAT_RAW_MONO;
+		position_sensor = GC02M1B_CAL_SENSOR_POSITION;
 
 #if defined(CONFIG_CAMERA_AAT_V12) || defined(CONFIG_CAMERA_AAT_V32X) ||\
 	defined(CONFIG_CAMERA_AAU_V22) || defined(CONFIG_CAMERA_MMU_V22)
@@ -1670,7 +1687,7 @@ static void set_imgsensor_info_by_sensor_id(unsigned int sensor_id)
 		LOG_INF("Min ISO: 33");
 #endif
 
-#if  defined(CONFIG_CAMERA_AAT_V12) || defined(CONFIG_CAMERA_MMU_V32) || defined(CONFIG_CAMERA_MMU_V22)
+#if defined(CONFIG_CAMERA_AAT_V12) || defined(CONFIG_CAMERA_MMU_V32) || defined(CONFIG_CAMERA_MMU_V22)
 		imgsensor_info.isp_driving_current = ISP_DRIVING_4MA; //mclk driving current
 #else
 		imgsensor_info.isp_driving_current = ISP_DRIVING_6MA; //mclk driving current
